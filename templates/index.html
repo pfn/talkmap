@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% block head %}
+<style type="text/css">
+.blank { font-style: italic; color: grey; }
+.selected { background: #aaf }
+</style>
+<script type="text/javascript"
+         src="http://www.google.com/maps/api/js?sensor=false"></script>
+<script type="text/javascript" src="/_ah/channel/jsapi"></script>
+<script type="text/javascript">
+
+var blankText = "Type and hit enter to send";
+
+var nick;
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) {
+    var nodes = document.querySelectorAll(sel);
+    var list = [];
+    for (var i = 0; i < nodes.length; i++) {
+        list.push(nodes[i]);
+    }
+    return list;
+}
+function setSize() {
+    $$("#map, #chat-box").forEach(function (e) {
+        e.style.height = (window.innerHeight - 40) + "px";
+    });
+    $("#chat-text").style.height = ($("#chat-box").clientHeight -
+            $("#chat-nick").clientHeight -
+            $("#chat-input").clientHeight - 55) + "px";
+}
+window.addEventListener('resize', function() {
+    setSize();
+}, false);
+var map;
+document.addEventListener('DOMContentLoaded', function f() {
+    var mapdiv = $('#map');
+    setSize();
+    map = new google.maps.Map(mapdiv, {
+        zoom: 8,
+        mapTypeId: google.maps.MapTypeId.ROADMAP,
+        center: new google.maps.LatLng({{lat}},{{lon}})
+    });
+    var cookies = document.cookie.split("; ");
+    for (var i = 0; i < cookies.length; i++) {
+        var c = cookies[i];
+        if (c.indexOf("chatnick=") == 0) {
+            nick = unescape(c.substring(c.indexOf("=") + 1));
+            $("#chat-nick").value = nick;
+        }
+    }
+    if (nick == null) {
+        nick = "guser" + Math.floor(10000 + Math.random() * 90000);
+        $("#chat-nick").value = nick;
+        savenick();
+    }
+    $("#chat-nick").addEventListener("change", function() {
+        nick = $("#chat-nick").value;
+        savenick();
+    }, false);
+    $("#chat-input").addEventListener("focus", function() {
+        var input = $("#chat-input");
+        if (input.value.trim() == blankText) {
+            input.value = "";
+        }
+        input.className = "";
+    }, false);
+    $("#chat-input").addEventListener("blur", function() {
+        var input = $("#chat-input");
+        if (input.value.trim() == "") {
+            input.value = blankText;
+            input.className = "blank";
+        }
+    }, false);
+    $("#chat-input").value = blankText;
+    $("#chat-input").className = "blank";
+    $("#chat-input").addEventListener("keyup", function(e) {
+        var input = $("#chat-input");
+        if (e.keyCode == 10 || e.keyCode == 13) {
+            if (input.value.trim() != "") {
+                var xhr = new XMLHttpRequest();
+                xhr.open("POST", "/send", true);
+                xhr.setRequestHeader("Content-type", "application/json");
+                var request = {
+                    nick: nick,
+                    message: input.value
+                };
+                xhr.send(JSON.stringify(request));
+                input.value = "";
+            }
+        }
+    }, false);
+    var lastWindow = null;
+    function add_item(m, panto, ul) {
+        ul = ul || $("#chat-text ul");
+        var li = document.createElement("li");
+        var d = new Date(m.ts);
+        var hh = d.getHours();
+        if (hh < 10) hh = "0" + hh;
+        var mm = d.getMinutes();
+        if (mm < 10) mm = "0" + mm;
+        var marker = markers[m.nick + ":" + m.lat + ":" + m.lon];
+        var pos = new google.maps.LatLng(m.lat, m.lon);
+        if (panto) map.panTo(pos);
+        if (!marker) {
+            marker = new google.maps.Marker({
+                map: map,
+                draggable: false,
+                animation: google.maps.Animation.DROP,
+                position: pos
+            });
+            marker.nickname = m.nick;
+            markers[m.nick + ":" + m.lat + ":" + m.lon] = marker;
+            google.maps.event.addListener(marker, 'click', function() {
+                if (lastWindow) {
+                    lastWindow.close();
+                    lastWindow = null;
+                }
+                var span = document.createElement("span");
+                span.textContent = "Name: " + m.nick;
+                var info = new google.maps.InfoWindow({
+                    content: span,
+                    position: pos,
+                    maxWidth: 480
+                });
+                info.open(map, marker);
+                lastWindow = info;
+
+                var xpr = document.evaluate("//li[@mnick='" + m.nick + ":" + m.lat + ":" + m.lon +"']", ul, null, 6, null);
+                for (var i = 0; i < xpr.snapshotLength; i++) {
+                    var item = xpr.snapshotItem(i);
+                    item.className = "selected";
+                }
+            });
+        }
+
+        li.setAttribute("mnick", m.nick + ":" + m.lat + ":" + m.lon);
+        li.textContent = "" + hh + ":" + mm + " " +
+                m.nick + ": " + m.msg;
+        li.style.cursor = "pointer";
+
+        if (panto) {
+            if (lastWindow) {
+                lastWindow.close();
+                lastWindow = null;
+            }
+            var span = document.createElement("span");
+            span.textContent = m.nick + ": " + m.msg;
+            var info = new google.maps.InfoWindow({
+                content: span,
+                position: pos,
+                maxWidth: 480
+            });
+            info.open(map, marker);
+            $$("#chat-text ul li").forEach(function(item) {
+                item.className = "";
+            });
+            lastWindow = info;
+        }
+        li.addEventListener("click", function() {
+            map.panTo(pos);
+            var span = document.createElement("span");
+            span.textContent = m.nick + ": " + m.msg;
+            if (lastWindow) {
+                lastWindow.close();
+                lastWindow = null;
+            }
+            var info = new google.maps.InfoWindow({
+                content: span,
+                position: pos,
+                maxWidth: 480
+            });
+            info.open(map, marker);
+            $$("#chat-text ul li").forEach(function(item) {
+                item.className = "";
+            });
+            var xpr = document.evaluate("//li[@mnick='" + m.nick + ":" + m.lat + ":" + m.lon +"']", ul, null, 6, null);
+            for (var i = 0; i < xpr.snapshotLength; i++) {
+                var item = xpr.snapshotItem(i);
+                item.className = "selected";
+            }
+            lastWindow = info;
+        }, false);
+        ul.appendChild(li);
+    }
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "/playback", true);
+    xhr.onload = function() {
+        if (xhr.status == 200) {
+            var messages = JSON.parse(xhr.responseText);
+            var ul = $("#chat-text ul");
+            for (var i = 0; i < messages.length; i++) {
+                var m = messages[i];
+                add_item(m, false, ul)
+            }
+            $("#chat-text").scrollTop = $("#chat-text").scrollHeight;
+        }
+    };
+    xhr.send();
+    var channel = new goog.appengine.Channel("{{channel}}");
+    var keepaliverunning = false;
+    function keepalive() {
+        keepaliverunning = true;
+        if (opened) {
+            var r = new XMLHttpRequest();
+            r.open("POST", "/ping", true);
+            r.onload = function() {
+                if (xhr.status == 200)
+                    $("#user-count").textContent = r.responseText;
+            };
+            r.send("{{userid}}");
+        }
+        setTimeout(keepalive, 30000);
+    }
+    var opened = false;
+    var socket;
+    var handler = {
+        onopen: function() {
+            opened = true;
+            if (!keepaliverunning)
+                keepalive();
+        },
+        onerror: function(e) {
+            opened = false;
+            if (socket)
+                socket.close();
+        },
+        onmessage: function(m) {
+            opened = true;
+            var message = JSON.parse(m.data);
+            add_item(message, true);
+            $("#chat-text").scrollTop = $("#chat-text").scrollHeight;
+        },
+        onclose: function() {
+            opened = false;
+            socket = channel.open(this);
+        }
+    };
+    socket = channel.open(handler);
+}, false);
+var markers = {};
+
+function savenick() {
+    document.cookie = "chatnick=" + escape(nick) + "; expires=" +
+            (new Date(Date.now() + 1000 * 3600 * 24 * 365).toGMTString()) +
+            "; path=/";
+}
+
+</script>
+{% endblock %}
+{% block content %}
+<div id="chat-box" style="min-width: 240px; float: right; border: 1px solid black; width: 29%;">
+<div style="padding: 5px">
+  <div style="margin-bottom: 3px">
+  <label for="chat-nick" style="display: inline-block; width: 30%">Name</label>
+  <input type="text" id="chat-nick" style="width: 66%">
+  </div>
+
+  <div id="chat-text" style="background: #eee; overflow-y: auto; padding: 3px; margin-bottom: 3px">
+  <ul style="list-style: none; padding: 0; margin: 0 .25em">
+  </ul>
+  </div>
+  <div style="text-align: right">users online: <span id="user-count">{{ users }}</span></div>
+  <input type="text" id="chat-input" style="width: 98%">
+</div>
+</div>
+<div id="map" style="width: 70%; border: 1px solid black">
+</div>
+{% endblock %}
