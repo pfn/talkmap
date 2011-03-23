@@ -4,14 +4,16 @@
 .blank { font-style: italic; color: grey; }
 .selected { background: #aaf }
 </style>
-<script type="text/javascript"
-         src="http://www.google.com/maps/api/js?sensor=false"></script>
+<!-- for google.loader.ClientLocation -->
+<script type="text/javascript" src="http://www.google.com/jsapi?autoload=%7B%22modules%22%3A%5B%7B%22name%22%3A%22maps%22%2C%22version%22%3A%223%22%2C%22other_params%22%3A%22sensor%3Dfalse%22%7D%5D%7D&key=ABQIAAAAN2mOaGTGRmHj7YXDqm3y2hRFUcGMNGXSsvhvt7-4vuAWGBAOthQP63-yYDUAtFcKEn-__YD7-88Z7g"></script>
+
 <script type="text/javascript" src="/_ah/channel/jsapi"></script>
 <script type="text/javascript">
+// TODO add user voting: kick a user off if a user has received enough votes
+// TODO vote = mute
+// TODO don't allow blank in nicks, revert to previous if blank
+// TODO add nick protection?
 
-var blankText = "Type and hit enter to send";
-
-var nick;
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) {
     var nodes = document.querySelectorAll(sel);
@@ -28,19 +30,53 @@ function setSize() {
     $("#chat-text").style.height = ($("#chat-box").clientHeight -
             $("#chat-nick").clientHeight -
             $("#chat-input").clientHeight - 55) + "px";
+    $("#chat-text").scrollTop = $("#chat-text").scrollHeight;
 }
-window.addEventListener('resize', function() {
-    setSize();
-}, false);
-var map;
+window.addEventListener('resize', setSize, false);
 document.addEventListener('DOMContentLoaded', function f() {
-    var mapdiv = $('#map');
+    var userid    = "{{userid}}";
+    var BERMUDA_TRIANGLE = { latitude: 25.443275, longitude: -70.576172 }
+
+    var latitude  = BERMUDA_TRIANGLE.latitude;
+    var longitude = BERMUDA_TRIANGLE.longitude;
+    if (google.loader.ClientLocation) {
+        latitude  = google.loader.ClientLocation.latitude;
+        longitude = google.loader.ClientLocation.longitude;
+    }
+    var blankText = "Type and press enter to send";
+    var mapdiv    = $('#map');
+    var markers   = {};
+    var map;
+    var nick;
+    var nickre;
+    function savenick() {
+        document.cookie = "chatnick=" + escape(nick) + "; expires=" +
+                (new Date(Date.now() + 1000 * 3600 * 24 * 365).toGMTString()) +
+                "; path=/";
+        document.cookie = "chatuser=" + escape(userid) + "; expires=" +
+                (new Date(Date.now() + 1000 * 3600 * 24 * 365).toGMTString()) +
+                "; path=/";
+    }
     setSize();
     map = new google.maps.Map(mapdiv, {
-        zoom: 8,
+        zoom: 7,
         mapTypeId: google.maps.MapTypeId.ROADMAP,
         center: new google.maps.LatLng({{lat}},{{lon}})
     });
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function(l) {
+            latitude  = l.coords.latitude;
+            longitude = l.coords.longitude;
+            var p = new google.maps.LatLng(latitude, longitude);
+            map.panTo(p);
+            var r = new XMLHttpRequest();
+            r.open("POST", "/geoip-html5", true);
+            r.send(JSON.stringify({
+                latitude:  latitude,
+                longitude: longitude
+            }));
+        }, function() {});
+    }
     var cookies = document.cookie.split("; ");
     for (var i = 0; i < cookies.length; i++) {
         var c = cookies[i];
@@ -48,16 +84,20 @@ document.addEventListener('DOMContentLoaded', function f() {
             nick = unescape(c.substring(c.indexOf("=") + 1));
             $("#chat-nick").value = nick;
         }
+        if (c.indexOf("chatuser=") == 0) {
+            userid = unescape(c.substring(c.indexOf("=") + 1));
+        }
     }
     if (nick == null) {
         nick = "guser" + Math.floor(10000 + Math.random() * 90000);
         $("#chat-nick").value = nick;
-        savenick();
     }
+    savenick();
     $("#chat-nick").addEventListener("change", function() {
         nick = $("#chat-nick").value;
         savenick();
     }, false);
+    nickre = new RegExp("\\b" + nick + "\\b");
     $("#chat-input").addEventListener("focus", function() {
         var input = $("#chat-input");
         if (input.value.trim() == blankText) {
@@ -74,6 +114,67 @@ document.addEventListener('DOMContentLoaded', function f() {
     }, false);
     $("#chat-input").value = blankText;
     $("#chat-input").className = "blank";
+    var nicklist = [];
+    var completing = false;
+    $("#chat-input").addEventListener("keydown", function(e) {
+        if (e.keyCode == 9) {
+            var input = $("#chat-input");
+            var value = input.value;
+            var start = input.selectionStart;
+            var end = input.selectionEnd;
+            var beginning = value.lastIndexOf(" ", start - 1);
+            var prefix = value.substring(
+                    beginning == -1 ? 0 : (beginning + 1), start);
+            var current = null;
+            if (start != end) {
+                current = prefix + value.substring(start, end);
+            }
+            var searchindex = nicklist.length - 1;
+            if (current)
+                searchindex = nicklist.lastIndexOf(current);
+            var found = false;
+            var candidate = null;
+            for (var i = searchindex; i >= 0 && !found; i--) {
+                var c = nicklist[i];
+                if (current != c && c.indexOf(prefix) == 0) {
+                    found = true;
+                    candidate = c;
+                }
+                if (i == 0 && !found) {
+                    for (var j = nicklist.length - 1; j >= 0 && !found; j--) {
+                        c = nicklist[j];
+                        if (current != c && c.indexOf(prefix) == 0) {
+                            candidate = c;
+                            found = true;
+                        }
+                    }
+                }
+            }
+            if (candidate) {
+                var suffix = candidate.substring(prefix.length);
+                var atstart = value.substring(0, start);
+                var atend = value.substring(end, value.length);
+                input.value = atstart + suffix + atend;
+                input.selectionStart = start;
+                input.selectionEnd = start + suffix.length;
+            }
+
+            completing = true;
+            e.preventDefault();
+        }
+        if (e.keyCode == 8 || e.keyCode == 46) { // backspace/delete
+            completing = false;
+        }
+        // space, comma, colon/semicolon, period and slash/?
+        if ([32, 186, 188, 189, 190, 191].indexOf(e.keyCode) != -1) {
+            if (completing) {
+                var input = $("#chat-input");
+                input.selectionEnd += 1;
+                input.selectionStart = input.selectionEnd
+                completing = false;
+            }
+        }
+    }, false);
     $("#chat-input").addEventListener("keyup", function(e) {
         var input = $("#chat-input");
         if (e.keyCode == 10 || e.keyCode == 13) {
@@ -82,8 +183,9 @@ document.addEventListener('DOMContentLoaded', function f() {
                 xhr.open("POST", "/send", true);
                 xhr.setRequestHeader("Content-type", "application/json");
                 var request = {
-                    nick: nick,
-                    message: input.value
+                    user:    userid,
+                    nick:    nick,
+                    message: input.value.substring(0, 500)
                 };
                 xhr.send(JSON.stringify(request));
                 input.value = "";
@@ -92,6 +194,13 @@ document.addEventListener('DOMContentLoaded', function f() {
     }, false);
     var lastWindow = null;
     function add_item(m, panto, ul) {
+        var nickindex = nicklist.indexOf(m.nick);
+        if (nickindex != -1)
+            nicklist.splice(nickindex, 1);
+        nicklist.push(m.nick);
+        if (nicklist.length > 100)
+            nicklist.splice(0, nicklistlength - 100);
+
         ul = ul || $("#chat-text ul");
         var li = document.createElement("li");
         var d = new Date(m.ts);
@@ -99,9 +208,22 @@ document.addEventListener('DOMContentLoaded', function f() {
         if (hh < 10) hh = "0" + hh;
         var mm = d.getMinutes();
         if (mm < 10) mm = "0" + mm;
-        var marker = markers[m.nick + ":" + m.lat + ":" + m.lon];
+        var marker = markers[m.user + ":" + m.lat + ":" + m.lon];
         var pos = new google.maps.LatLng(m.lat, m.lon);
         if (panto) map.panTo(pos);
+        function clearSelection() {
+            $$("#chat-text ul li").forEach(function(item) {
+                item.className = "";
+            });
+        }
+        function highlightItems(m) {
+            var xpath = "//li[@userid='" + m.user + "']";
+            var xpr = document.evaluate(xpath, ul, null, 6, null);
+            for (var i = 0; i < xpr.snapshotLength; i++) {
+                var item = xpr.snapshotItem(i);
+                item.className = "selected";
+            }
+        }
         if (!marker) {
             marker = new google.maps.Marker({
                 map: map,
@@ -110,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function f() {
                 position: pos
             });
             marker.nickname = m.nick;
-            markers[m.nick + ":" + m.lat + ":" + m.lon] = marker;
+            markers[m.user + ":" + m.lat + ":" + m.lon] = marker;
             google.maps.event.addListener(marker, 'click', function() {
                 if (lastWindow) {
                     lastWindow.close();
@@ -126,17 +248,57 @@ document.addEventListener('DOMContentLoaded', function f() {
                 info.open(map, marker);
                 lastWindow = info;
 
-                var xpr = document.evaluate("//li[@mnick='" + m.nick + ":" + m.lat + ":" + m.lon +"']", ul, null, 6, null);
-                for (var i = 0; i < xpr.snapshotLength; i++) {
-                    var item = xpr.snapshotItem(i);
-                    item.className = "selected";
-                }
+                highlightItems(m);
+                google.maps.event.addListener(info, 'closeclick', function() {
+                    clearSelection();
+                });
             });
         }
 
-        li.setAttribute("mnick", m.nick + ":" + m.lat + ":" + m.lon);
-        li.textContent = "" + hh + ":" + mm + " " +
-                m.nick + ": " + m.msg;
+        li.setAttribute("userid", escape(m.user));
+
+        li.textContent = "" + hh + ":" + mm + " " + m.nick + ": ";
+        var lispan = document.createElement("span");
+        var ptr = -1;
+        var http  = m.msg.indexOf("http://");
+        var https = m.msg.indexOf("https://");
+        if (http == -1 && https == -1) {
+            lispan.textContent = m.msg;
+        }
+        var start = 0;
+        while (http != -1 || https != -1) {
+            var idx = http != -1 ? http : https;
+            lispan.appendChild(document.createTextNode(
+                    m.msg.substring(start, idx)));
+            var end = m.msg.indexOf(" ", idx);
+            var href;
+            if (end == -1) {
+                href = m.msg.substring(idx, m.msg.length);
+                http  = -1;
+                https = -1;
+            } else {
+                start = end;
+                href = m.msg.substring(idx, end);
+                http  = m.msg.indexOf("http://", end);
+                https = m.msg.indexOf("https://", end);
+            }
+            var a = document.createElement("a");
+            a.setAttribute("href", href);
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "nofollow");
+            a.textContent = href;
+            lispan.appendChild(a);
+            if (end != -1) {
+                idx = http != -1 ? http : https;
+                lispan.appendChild(document.createTextNode(
+                        m.msg.substring(start,
+                                idx == -1 ? m.msg.length : idx)));
+            }
+        }
+
+        li.appendChild(lispan);
+        if (m.nick != nick && m.msg.match(nickre))
+            lispan.setAttribute("style", "color: red");
         li.style.cursor = "pointer";
 
         if (panto) {
@@ -152,9 +314,7 @@ document.addEventListener('DOMContentLoaded', function f() {
                 maxWidth: 480
             });
             info.open(map, marker);
-            $$("#chat-text ul li").forEach(function(item) {
-                item.className = "";
-            });
+            clearSelection();
             lastWindow = info;
         }
         li.addEventListener("click", function() {
@@ -171,14 +331,12 @@ document.addEventListener('DOMContentLoaded', function f() {
                 maxWidth: 480
             });
             info.open(map, marker);
-            $$("#chat-text ul li").forEach(function(item) {
-                item.className = "";
+            clearSelection();
+            highlightItems(m);
+
+            google.maps.event.addListener(info, 'closeclick', function() {
+                clearSelection();
             });
-            var xpr = document.evaluate("//li[@mnick='" + m.nick + ":" + m.lat + ":" + m.lon +"']", ul, null, 6, null);
-            for (var i = 0; i < xpr.snapshotLength; i++) {
-                var item = xpr.snapshotItem(i);
-                item.className = "selected";
-            }
             lastWindow = info;
         }, false);
         ul.appendChild(li);
@@ -197,6 +355,10 @@ document.addEventListener('DOMContentLoaded', function f() {
         }
     };
     xhr.send();
+    var geoxhr = new XMLHttpRequest();
+    geoxhr.open("POST", "/geoip", true);
+    geoxhr.send(JSON.stringify(google.loader.ClientLocation));
+
     var channel = new goog.appengine.Channel("{{channel}}");
     var keepaliverunning = false;
     function keepalive() {
@@ -205,10 +367,15 @@ document.addEventListener('DOMContentLoaded', function f() {
             var r = new XMLHttpRequest();
             r.open("POST", "/ping", true);
             r.onload = function() {
-                if (xhr.status == 200)
+                if (r.status == 200)
                     $("#user-count").textContent = r.responseText;
             };
-            r.send("{{userid}}");
+            var req = JSON.stringify({
+                id:  userid,
+                lat: latitude,
+                lng: longitude
+            });
+            r.send(req);
         }
         setTimeout(keepalive, 30000);
     }
@@ -222,8 +389,7 @@ document.addEventListener('DOMContentLoaded', function f() {
         },
         onerror: function(e) {
             opened = false;
-            if (socket)
-                socket.close();
+            // onclose is called next, I think?
         },
         onmessage: function(m) {
             opened = true;
@@ -233,19 +399,27 @@ document.addEventListener('DOMContentLoaded', function f() {
         },
         onclose: function() {
             opened = false;
-            socket = channel.open(this);
+            if (socket)
+                socket.close();
+            var iframe = $("#wcs-iframe"); // talkgadget bug workaround
+            if (iframe)
+                iframe.parentNode.removeChild(iframe);
+            var r = new XMLHttpRequest();
+            r.open("POST", "/channel-token", true);
+            r.onload = function() {
+                if (r.status == 200) {
+                    channel = new goog.appengine.Channel(r.responseText);
+                    socket = channel.open(handler);
+                } else {
+                    console.log("Unable to request new channel id: " +
+                            r.status + " => " + r.responseText);
+                }
+            };
+            r.send();
         }
     };
     socket = channel.open(handler);
 }, false);
-var markers = {};
-
-function savenick() {
-    document.cookie = "chatnick=" + escape(nick) + "; expires=" +
-            (new Date(Date.now() + 1000 * 3600 * 24 * 365).toGMTString()) +
-            "; path=/";
-}
-
 </script>
 {% endblock %}
 {% block content %}

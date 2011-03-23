@@ -1,0 +1,5 @@
+cron:
+- description: clear old messages
+  url: /purge
+  schedule: every 2 hours
+
