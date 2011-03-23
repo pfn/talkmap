@@ -217,12 +217,10 @@ document.addEventListener('DOMContentLoaded', function f() {
             });
         }
         function highlightItems(m) {
-            var xpath = "//li[@userid='" + m.user + "']";
-            var xpr = document.evaluate(xpath, ul, null, 6, null);
-            for (var i = 0; i < xpr.snapshotLength; i++) {
-                var item = xpr.snapshotItem(i);
+            var sel = "[userid='" + m.user + "']";
+            $$(sel).forEach(function(item) {
                 item.className = "selected";
-            }
+            });
         }
         if (!marker) {
             marker = new google.maps.Marker({
