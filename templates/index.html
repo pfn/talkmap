@@ -450,10 +450,9 @@ document.addEventListener('DOMContentLoaded', function f() {
 
     var channel;
     var socket;
-    var keepaliverunning = false;
     var newversionalert = 0;
+    var opened = false;
     function keepalive() {
-        keepaliverunning = true;
         if (opened) {
             var r = new XMLHttpRequest();
             r.open("POST", "/ping", true);
@@ -485,12 +484,10 @@ document.addEventListener('DOMContentLoaded', function f() {
         }
         setTimeout(keepalive, 30 * 1000);
     }
-    var opened = false;
+    keepalive();
     var handler = {
         onopen: function() {
             opened = true;
-            if (!keepaliverunning)
-                keepalive();
         },
         onerror: function(e) {
             opened = false;
