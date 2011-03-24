@@ -15,7 +15,7 @@ import simplejson
 GEO_URL = "http://abort.boom.net/~pfnguyen/geoip.cgi/%s"
 BERMUDA_TRIANGLE = { 'latitude': 25.443275, 'longitude': -70.576172 }
 
-VERSION = 201103232002
+VERSION = 201103240910
 
 class Message(db.Model):
     user    = db.StringProperty()
@@ -269,8 +269,12 @@ class ChannelTokenHandler(Handler):
         if data:
             keydata = simplejson.loads(data)
             # two hour validity on channel key, give 200s of headroom
-            if time.time() - keydata['ts'] >= 2 * 3500:
+            if (time.time() - keydata['ts']) >= (2 * 3500):
                 channelkey = channel.create_channel(userid)
+                keydata['key'] = channelkey
+                keydata['ts'] = time.time()
+                memcache.set("channelkey-%s" % userid,
+                        simplejson.dumps(keydata))
             else:
                 channelkey = keydata['key']
         else:

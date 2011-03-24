@@ -494,7 +494,9 @@ document.addEventListener('DOMContentLoaded', function f() {
         },
         onerror: function(e) {
             opened = false;
-            // onclose is called next, I think?
+            if (console && console.log) {
+                console.log("Channel API error: " + JSON.stringify(e));
+            }
         },
         onmessage: function(m) {
             opened = true;
@@ -567,7 +569,7 @@ document.addEventListener('DOMContentLoaded', function f() {
 </p>
 </div>
 <script type="text/javascript">
-if (!window.addEventListener || !document.querySelector || !document.querySelectorAll) {
+if (!window.addEventListener || !document.querySelector || !document.querySelectorAll || !window.JSON) {
     var div = document.getElementById("chat-content");
     div.style.display = "none";
     div = document.getElementById("error-content");
