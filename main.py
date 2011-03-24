@@ -5,6 +5,7 @@ import os
 import logging
 import uuid
 import time
+import math
 from google.appengine.api.channel import InvalidChannelClientIdError
 from google.appengine.api import users, channel, urlfetch, memcache
 from google.appengine.ext import webapp, db
@@ -13,6 +14,8 @@ import simplejson
 
 GEO_URL = "http://abort.boom.net/~pfnguyen/geoip.cgi/%s"
 BERMUDA_TRIANGLE = { 'latitude': 25.443275, 'longitude': -70.576172 }
+
+VERSION = 201103232002
 
 class Message(db.Model):
     user    = db.StringProperty()
@@ -85,6 +88,7 @@ def get_channels():
     return channels
 
 # TODO check if size > 1mb, if so, purge old entries until <1mb
+# losing cache entries shouldn't be horrible, PingHandler will restore them
 def purge_channels(userid=None):
     c = memcache.get("channels")
     now = time.time()
@@ -98,7 +102,10 @@ def purge_channels(userid=None):
         if (now - float(channels[k])) > 60:
             del channels[k]
     memcache.set("channels", simplejson.dumps(channels))
-    return len(channels)
+    return simplejson.dumps({
+        'users':   len(channels),
+        'version': VERSION
+    })
     
 # set geoip if we fail to find it using maxmind
 class GeoIPHandler(Handler):
@@ -141,23 +148,35 @@ class PingHandler(Handler):
             }
             memcache.set("geo%s" % ip, simplejson.dumps(geo))
 
-        count = purge_channels(userid)
-        self.respond(str(count))
+        self.respond(purge_channels(userid))
 
 class PlaybackHandler(Handler):
     def get(self):
+        cache = memcache.get("playback")
+        if cache:
+            self.respond(cache)
+            return
         messages = Message.all().order("-ts").fetch(100)
         messages.reverse()
         m = []
         for msg in messages:
             m.append(messagedict(msg))
-        self.respond(simplejson.dumps(m))
+        data = simplejson.dumps(m)
+        memcache.set("playback", data)
+        self.respond(data)
 
 class SendHandler(Handler):
     def post(self):
-        m               = simplejson.loads(self.request.body)
+        m = simplejson.loads(self.request.body)
+
+        squelch = decay_squelch(m['user'])
+        if squelch >= 1.8:
+            self.respond("Quiet troll!  Rating >= 1.8: %.2f" % squelch, 403)
+            return
+
         ip              = self.request.environ['REMOTE_ADDR']
         (lat, lon)      = geolocate(ip)
+
         message         = Message()
         message.user    = m['user']
         message.message = m['message']
@@ -166,10 +185,20 @@ class SendHandler(Handler):
         message.geo     = db.GeoPt(lat, lon)
         message.put()
 
+        # can lose playback messages in the caching here...
+        msg   = messagedict(message)
+        cache = memcache.get("playback")
+        if cache:
+            l = simplejson.loads(cache)
+            l.append(msg)
+            while len(l) > 100:
+                del l[0]
+            memcache.set("playback", simplejson.dumps(l))
+
         channels = get_channels()
         for k in channels.keys():
             try:
-                channel.send_message(k, simplejson.dumps(messagedict(message)))
+                channel.send_message(k, simplejson.dumps(msg))
             except InvalidChannelClientIdError, e:
                 logging.error("Unable to send to channel: %s => %s" % (k, e))
 
@@ -189,10 +218,44 @@ class MainHandler(Handler):
         self.render("index.html", {
             'lat':     lat,
             'lon':     lon,
-            'channel': channel.create_channel(userid),
+            #'channel': channel.create_channel(userid),
             'userid':  userid,
-            'users':   len(get_channels())
+            'users':   len(get_channels()),
+            'version': VERSION,
         });
+
+def decay_squelch(userid, incr=0):
+    data     = memcache.get("squelch-%s" % userid)
+
+    if data or incr > 0:
+        if not data:
+            squelch = {
+                'count': incr,
+                'ts':    time.time()
+            }
+        else:
+            squelch          = simplejson.loads(data)
+            ts               = squelch['ts']
+            delta            = time.time() - ts
+            fraction         = delta / 600
+            squelch['count'] = squelch['count'] * (math.e ** -fraction) + incr
+            squelch['ts']    = time.time()
+
+        if squelch['count'] > 0.1:
+            memcache.set("squelch-%s" % userid, simplejson.dumps(squelch))
+        else:
+            memcache.delete("squelch-%s" % userid)
+    else:
+        squelch = {
+            'count': 0.0,
+        }
+
+    return squelch['count']
+
+class SquelchHandler(Handler):
+    def post(self):
+        userid = self.request.body.strip()
+        decay_squelch(userid, 1)
 
 class ChannelTokenHandler(Handler):
     def post(self):
@@ -212,6 +275,7 @@ urls = [
     ('/geoip',         GeoIPHandler),
     ('/geoip-html5',   GeoIPHandler),
     ('/channel-token', ChannelTokenHandler),
+    ('/squelch',       SquelchHandler),
 ]
 
 def main():

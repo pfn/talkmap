@@ -3,17 +3,15 @@
 <style type="text/css">
 .blank { font-style: italic; color: grey; }
 .selected { background: #aaf }
+.lastread { border-bottom: 1px solid blue }
 </style>
 <!-- for google.loader.ClientLocation -->
 <script type="text/javascript" src="http://www.google.com/jsapi?autoload=%7B%22modules%22%3A%5B%7B%22name%22%3A%22maps%22%2C%22version%22%3A%223%22%2C%22other_params%22%3A%22sensor%3Dfalse%22%7D%5D%7D&key=ABQIAAAAN2mOaGTGRmHj7YXDqm3y2hRFUcGMNGXSsvhvt7-4vuAWGBAOthQP63-yYDUAtFcKEn-__YD7-88Z7g"></script>
 
 <script type="text/javascript" src="/_ah/channel/jsapi"></script>
 <script type="text/javascript">
-// TODO add user voting: kick a user off if a user has received enough votes
-// TODO vote = mute
-// TODO don't allow blank in nicks, revert to previous if blank
 // TODO add nick protection?
-
+try {
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) {
     var nodes = document.querySelectorAll(sel);
@@ -34,6 +32,38 @@ function setSize() {
 }
 window.addEventListener('resize', setSize, false);
 document.addEventListener('DOMContentLoaded', function f() {
+    var missCount = 0;
+    var countMissed = false;
+    function clearSelection(leaveLastRead) {
+        $$("#chat-text ul li").forEach(function(item) {
+            if (!leaveLastRead || item.className != "lastread")
+                item.className = "";
+        });
+    }
+    function missed() {
+        if (!countMissed) return;
+        var title = document.title;
+        if (title.indexOf("(") == 0)
+            title = title.substring(title.indexOf(")") + 2);
+        missCount++;
+        document.title = "(" + missCount + ") " + title;
+        if (missCount == 1) {
+            clearSelection();
+            // something is clobbering $?
+            window.$("#chat-text ul li:last-child").className = "lastread";
+        }
+    }
+    window.addEventListener('focus', function() {
+        countMissed = false;
+        var title = document.title;
+        if (title.indexOf("(") == 0)
+            document.title = title.substring(title.indexOf(")") + 2);
+    }, false);
+    window.addEventListener('blur', function() {
+        missCount = 0;
+        countMissed = true;
+    }, false);
+    var squelchlist = {};
     var userid    = "{{userid}}";
     var BERMUDA_TRIANGLE = { latitude: 25.443275, longitude: -70.576172 }
 
@@ -49,6 +79,13 @@ document.addEventListener('DOMContentLoaded', function f() {
     var map;
     var nick;
     var nickre;
+    function savesquelch() {
+        // save squelchlist for 30 minutes, help prevent excessive squelching
+        document.cookie = "chatkill=" + btoa(JSON.stringify(squelchlist)) +
+                "; expires=" +
+                (new Date(Date.now() + 1000 * 3600).toGMTString()) +
+                "; path=/";
+    }
     function savenick() {
         document.cookie = "chatnick=" + escape(nick) + "; expires=" +
                 (new Date(Date.now() + 1000 * 3600 * 24 * 365).toGMTString()) +
@@ -56,6 +93,7 @@ document.addEventListener('DOMContentLoaded', function f() {
         document.cookie = "chatuser=" + escape(userid) + "; expires=" +
                 (new Date(Date.now() + 1000 * 3600 * 24 * 365).toGMTString()) +
                 "; path=/";
+        nickre = new RegExp("\\b" + nick + "\\b", "i");
     }
     setSize();
     map = new google.maps.Map(mapdiv, {
@@ -87,6 +125,14 @@ document.addEventListener('DOMContentLoaded', function f() {
         if (c.indexOf("chatuser=") == 0) {
             userid = unescape(c.substring(c.indexOf("=") + 1));
         }
+        if (c.indexOf("chatkill=") == 0) {
+            try {
+                squelchlist = JSON.parse(atob(c.substring(c.indexOf("=") + 1)));
+            } catch (e) {
+                if (console && console.log)
+                    console.log("could not reload squelch list: " + e);
+            }
+        }
     }
     if (nick == null) {
         nick = "guser" + Math.floor(10000 + Math.random() * 90000);
@@ -94,10 +140,17 @@ document.addEventListener('DOMContentLoaded', function f() {
     }
     savenick();
     $("#chat-nick").addEventListener("change", function() {
+        var oldnick = nick;
         nick = $("#chat-nick").value;
+        var _nick = nick;
+        nick = nick.replace(/\s/g, '');
+        if (nick.length == 0)
+            nick = oldnick;
+        if (_nick != nick)
+            $("#chat-nick").value = nick;
+
         savenick();
     }, false);
-    nickre = new RegExp("\\b" + nick + "\\b");
     $("#chat-input").addEventListener("focus", function() {
         var input = $("#chat-input");
         if (input.value.trim() == blankText) {
@@ -123,8 +176,8 @@ document.addEventListener('DOMContentLoaded', function f() {
             var start = input.selectionStart;
             var end = input.selectionEnd;
             var beginning = value.lastIndexOf(" ", start - 1);
-            var prefix = value.substring(
-                    beginning == -1 ? 0 : (beginning + 1), start);
+            var prefix = value.substring(beginning == -1 ?
+                    0 : (beginning + 1), start).toLowerCase();
             var current = null;
             if (start != end) {
                 current = prefix + value.substring(start, end);
@@ -136,14 +189,15 @@ document.addEventListener('DOMContentLoaded', function f() {
             var candidate = null;
             for (var i = searchindex; i >= 0 && !found; i--) {
                 var c = nicklist[i];
-                if (current != c && c.indexOf(prefix) == 0) {
+                if (current != c && c.toLowerCase().indexOf(prefix) == 0) {
                     found = true;
                     candidate = c;
                 }
                 if (i == 0 && !found) {
                     for (var j = nicklist.length - 1; j >= 0 && !found; j--) {
                         c = nicklist[j];
-                        if (current != c && c.indexOf(prefix) == 0) {
+                        if (current != c &&
+                                c.toLowerCase().indexOf(prefix) == 0) {
                             candidate = c;
                             found = true;
                         }
@@ -181,7 +235,13 @@ document.addEventListener('DOMContentLoaded', function f() {
             if (input.value.trim() != "") {
                 var xhr = new XMLHttpRequest();
                 xhr.open("POST", "/send", true);
+                xhr.onload = function() {
+                    if (xhr.status == 403) {
+                        add_message(xhr.responseText);
+                    }
+                };
                 xhr.setRequestHeader("Content-type", "application/json");
+
                 var request = {
                     user:    userid,
                     nick:    nick,
@@ -193,7 +253,18 @@ document.addEventListener('DOMContentLoaded', function f() {
         }
     }, false);
     var lastWindow = null;
+    function add_message(message, color) {
+        var li = document.createElement("li");
+        li.textContent = message;
+        li.style.color = color ? color : "red";
+        $("#chat-text ul").appendChild(li);
+        var div = $("#chat-text");
+        div.scrollTop = div.scrollHeight;
+        return li;
+    }
     function add_item(m, panto, ul) {
+        if (squelchlist[m.user]) return; // squelched message
+        missed();
         var nickindex = nicklist.indexOf(m.nick);
         if (nickindex != -1)
             nicklist.splice(nickindex, 1);
@@ -211,11 +282,6 @@ document.addEventListener('DOMContentLoaded', function f() {
         var marker = markers[m.user + ":" + m.lat + ":" + m.lon];
         var pos = new google.maps.LatLng(m.lat, m.lon);
         if (panto) map.panTo(pos);
-        function clearSelection() {
-            $$("#chat-text ul li").forEach(function(item) {
-                item.className = "";
-            });
-        }
         function highlightItems(m) {
             var sel = "[userid='" + m.user + "']";
             $$(sel).forEach(function(item) {
@@ -312,7 +378,7 @@ document.addEventListener('DOMContentLoaded', function f() {
                 maxWidth: 480
             });
             info.open(map, marker);
-            clearSelection();
+            clearSelection(true);
             lastWindow = info;
         }
         li.addEventListener("click", function() {
@@ -337,6 +403,31 @@ document.addEventListener('DOMContentLoaded', function f() {
             });
             lastWindow = info;
         }, false);
+        li.addEventListener("dblclick", function() {
+            var s_user = li.getAttribute("userid");
+            if (s_user == userid) return;
+
+            if (s_user in squelchlist) {
+                squelchlist[s_user] = !squelchlist[s_user];
+            } else {
+                squelchlist[s_user] = true;
+                var r = new XMLHttpRequest();
+                r.open("POST", "/squelch", true);
+                r.send(s_user);
+            }
+
+            var sel = "[userid='" + s_user + "']";
+            if (squelchlist[s_user]) {
+                $$(sel).forEach(function(item) {
+                    item.style.color = "#ddd";
+                });
+            } else {
+                $$(sel).forEach(function(item) {
+                    item.style.color = "black";
+                });
+            }
+            savesquelch();
+        }, false);
         ul.appendChild(li);
     }
     var xhr = new XMLHttpRequest();
@@ -357,8 +448,10 @@ document.addEventListener('DOMContentLoaded', function f() {
     geoxhr.open("POST", "/geoip", true);
     geoxhr.send(JSON.stringify(google.loader.ClientLocation));
 
-    var channel = new goog.appengine.Channel("{{channel}}");
+    var channel;
+    var socket;
     var keepaliverunning = false;
+    var newversionalert = 0;
     function keepalive() {
         keepaliverunning = true;
         if (opened) {
@@ -366,7 +459,22 @@ document.addEventListener('DOMContentLoaded', function f() {
             r.open("POST", "/ping", true);
             r.onload = function() {
                 if (r.status == 200)
-                    $("#user-count").textContent = r.responseText;
+                    var data = JSON.parse(r.responseText);
+                    $("#user-count").textContent = data.users;
+                    if (data.version != {{version}}) {
+                        if (newversionalert == 0) {
+                            document.title = "[RELOAD] " + document.title;
+                        }
+                        // alert once every 10 minutes
+                        if (newversionalert++ % 20 == 0) {
+                            var li = add_message(
+                                    "A new version is available, reload");
+                            li.addEventListener("click", function() {
+                                window.location.reload();
+                            }, false);
+                            li.style.cursor = "pointer";
+                        }
+                    }
             };
             var req = JSON.stringify({
                 id:  userid,
@@ -375,10 +483,9 @@ document.addEventListener('DOMContentLoaded', function f() {
             });
             r.send(req);
         }
-        setTimeout(keepalive, 30000);
+        setTimeout(keepalive, 30 * 1000);
     }
     var opened = false;
-    var socket;
     var handler = {
         onopen: function() {
             opened = true;
@@ -402,25 +509,34 @@ document.addEventListener('DOMContentLoaded', function f() {
             var iframe = $("#wcs-iframe"); // talkgadget bug workaround
             if (iframe)
                 iframe.parentNode.removeChild(iframe);
-            var r = new XMLHttpRequest();
-            r.open("POST", "/channel-token", true);
-            r.onload = function() {
-                if (r.status == 200) {
-                    channel = new goog.appengine.Channel(r.responseText);
-                    socket = channel.open(handler);
-                } else {
-                    console.log("Unable to request new channel id: " +
-                            r.status + " => " + r.responseText);
-                }
-            };
-            r.send();
+            openChannel();
         }
     };
-    socket = channel.open(handler);
+    function openChannel() {
+        var r = new XMLHttpRequest();
+        r.open("POST", "/channel-token", true);
+        r.onload = function() {
+            if (r.status == 200) {
+                channel = new goog.appengine.Channel(r.responseText);
+                socket = channel.open(handler);
+            } else {
+                alert("Unable to open a new channel: " + r.status + " => " +
+                        r.responseText);
+            }
+        };
+        r.send();
+    }
+    openChannel();
 }, false);
+} catch (exception) {
+    if (console && console.log) {
+        console.log("Caught an error initializing: " + exception);
+    }
+}
 </script>
 {% endblock %}
 {% block content %}
+<div id="chat-content">
 <div id="chat-box" style="min-width: 240px; float: right; border: 1px solid black; width: 29%;">
 <div style="padding: 5px">
   <div style="margin-bottom: 3px">
@@ -436,6 +552,27 @@ document.addEventListener('DOMContentLoaded', function f() {
   <input type="text" id="chat-input" style="width: 98%">
 </div>
 </div>
+
 <div id="map" style="width: 70%; border: 1px solid black">
 </div>
+</div>
+<div id="error-content" style="display: none">
+<p>Please stop using a crappy browser.</p>
+<p>Supported browsers include:
+<ul>
+<li>Firefox 3.6+</li>
+<li>Chrome 9+</li>
+<li>Internet Explorer 9+</li>
+</ul>
+</p>
+</div>
+<script type="text/javascript">
+if (!window.addEventListener || !document.querySelector || !document.querySelectorAll) {
+    var div = document.getElementById("chat-content");
+    div.style.display = "none";
+    div = document.getElementById("error-content");
+    div.style.display = "block";
+    throw Error("Please stop using a crappy browser");
+}
+</script>
 {% endblock %}
