@@ -264,7 +264,23 @@ class ChannelTokenHandler(Handler):
         else:
             self.respond("Error", 403)
             return
-        self.respond(channel.create_channel(userid))
+        channelkey = None
+        data = memcache.get("channelkey-%s" % userid)
+        if data:
+            keydata = simplejson.loads(data)
+            # two hour validity on channel key, give 200s of headroom
+            if time.time() - keydata['ts'] >= 2 * 3500:
+                channelkey = channel.create_channel(userid)
+            else:
+                channelkey = keydata['key']
+        else:
+            channelkey = channel.create_channel(userid)
+            keydata = simplejson.dumps({
+                'key': channelkey,
+                'ts':  time.time()
+            })
+            memcache.set("channelkey-%s" % userid, keydata)
+        self.respond(channelkey)
 
 urls = [
     ('/',              MainHandler),
