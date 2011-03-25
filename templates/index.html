@@ -486,11 +486,19 @@ document.addEventListener('DOMContentLoaded', function f() {
     }
     keepalive();
     var handler = {
+        errors: 0,
         onopen: function() {
             opened = true;
         },
         onerror: function(e) {
             opened = false;
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            this.errors++;
+            if ((this.errors % 20) == 0)
+                alert("Channel API error: " + JSON.stringify(e));
             if (console && console.log) {
                 console.log("Channel API error: " + JSON.stringify(e));
             }
