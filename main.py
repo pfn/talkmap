@@ -15,7 +15,7 @@ import simplejson
 GEO_URL = "http://abort.boom.net/~pfnguyen/geoip.cgi/%s"
 BERMUDA_TRIANGLE = { 'latitude': 25.443275, 'longitude': -70.576172 }
 
-VERSION = 201103250852
+VERSION = 201103291643
 
 class Message(db.Model):
     user    = db.StringProperty()

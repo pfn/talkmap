@@ -49,8 +49,11 @@ document.addEventListener('DOMContentLoaded', function f() {
         document.title = "(" + missCount + ") " + title;
         if (missCount == 1) {
             clearSelection();
-            // something is clobbering $?
-            window.$("#chat-text ul li:last-child").className = "lastread";
+            // something is clobbering $? -- or is it just a side effect
+            // of looking at it in chrome's dev console
+            var last = window.$("#chat-text ul li:last-child");
+            if (last) // fix for /playback during blur
+                last.className = "lastread";
         }
     }
     window.addEventListener('focus', function() {
@@ -79,6 +82,7 @@ document.addEventListener('DOMContentLoaded', function f() {
     var map;
     var nick;
     var nickre;
+    // TODO also load/save stuff into localStorage and not just cookies
     function savesquelch() {
         // save squelchlist for 30 minutes, help prevent excessive squelching
         document.cookie = "chatkill=" + btoa(JSON.stringify(squelchlist)) +
@@ -493,7 +497,6 @@ document.addEventListener('DOMContentLoaded', function f() {
         onerror: function(e) {
             opened = false;
             if (socket) {
-                socket.close();
                 socket = null;
             }
             this.errors++;
@@ -511,21 +514,25 @@ document.addEventListener('DOMContentLoaded', function f() {
         },
         onclose: function() {
             opened = false;
-            if (socket)
-                socket.close();
-            var iframe = $("#wcs-iframe"); // talkgadget bug workaround
-            if (iframe)
-                iframe.parentNode.removeChild(iframe);
+            if (socket) {
+                socket = null;
+            }
             openChannel();
         }
     };
     function openChannel() {
+        var iframe = $("#wcs-iframe"); // talkgadget bug workaround
+        if (iframe)
+            iframe.parentNode.removeChild(iframe);
         var r = new XMLHttpRequest();
         r.open("POST", "/channel-token", true);
         r.onload = function() {
             if (r.status == 200) {
                 channel = new goog.appengine.Channel(r.responseText);
                 socket = channel.open(handler);
+                if (console && console.log) {
+                    console.log("Opened a new channel socket");
+                }
             } else {
                 alert("Unable to open a new channel: " + r.status + " => " +
                         r.responseText);
@@ -544,7 +551,7 @@ document.addEventListener('DOMContentLoaded', function f() {
 {% endblock %}
 {% block content %}
 <div id="chat-content">
-<div id="chat-box" style="min-width: 240px; float: right; border: 1px solid black; width: 29%;">
+<div id="chat-box" style="min-width: 230px; float: right; border: 1px solid black; width: 29%;">
 <div style="padding: 5px">
   <div style="margin-bottom: 3px">
   <label for="chat-nick" style="display: inline-block; width: 30%">Name</label>
