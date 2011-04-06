@@ -15,7 +15,7 @@ import simplejson
 GEO_URL = "http://abort.boom.net/~pfnguyen/geoip.cgi/%s"
 BERMUDA_TRIANGLE = { 'latitude': 25.443275, 'longitude': -70.576172 }
 
-VERSION = 201103291643
+VERSION = 201104051125
 
 class Message(db.Model):
     user    = db.StringProperty()
@@ -220,7 +220,8 @@ class MainHandler(Handler):
             'lon':     lon,
             #'channel': channel.create_channel(userid),
             'userid':  userid,
-            'users':   len(get_channels()),
+            # get_channels doesn't include this user's new channel yet
+            'users':   len(get_channels()) + 1,
             'version': VERSION,
         });
 
@@ -282,6 +283,7 @@ class ChannelTokenHandler(Handler):
             })
             logging.info("Returning a brand new channelkey")
             memcache.set("channelkey-%s" % userid, keydata, 3600)
+        purge_channels(userid)
         self.respond(channelkey)
 
 urls = [

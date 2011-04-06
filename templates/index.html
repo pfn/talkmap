@@ -59,8 +59,12 @@ document.addEventListener('DOMContentLoaded', function f() {
     window.addEventListener('focus', function() {
         countMissed = false;
         var title = document.title;
-        if (title.indexOf("(") == 0)
-            document.title = title.substring(title.indexOf(")") + 2);
+        if (title.indexOf("(") == 0) {
+            setTimeout(function() {
+                // chrome redraw collision, tab title update is lost
+                document.title = title.substring(title.indexOf(")") + 2);
+            }, 200);
+        }
     }, false);
     window.addEventListener('blur', function() {
         missCount = 0;
@@ -82,6 +86,25 @@ document.addEventListener('DOMContentLoaded', function f() {
     var map;
     var nick;
     var nickre;
+    function showNotification(node) {
+        if (!window.webkitNotifications) return;
+        var p = webkitNotifications.checkPermission();
+        if (p != 0) return;
+        //var n = webkitNotifications.createNotification(null, "Talk Map", m);
+        var html = new XMLSerializer().serializeToString(node);
+        var n = webkitNotifications.createHTMLNotification(
+                "data:text/html," + escape(html));
+        // n.onclose = function() { n = null; };
+        n.show();
+        setTimeout(function() { if (n) n.cancel(); }, 15000);
+    }
+    function requestNotificationPermission() {
+        if (!window.webkitNotifications) return;
+        var p = webkitNotifications.checkPermission();
+        // 0 = allowed, 1 = haven't asked, 2 = denied
+        if (p == 1)
+            webkitNotifications.requestPermission();
+    }
     // TODO also load/save stuff into localStorage and not just cookies
     function savesquelch() {
         // save squelchlist for 30 minutes, help prevent excessive squelching
@@ -101,7 +124,7 @@ document.addEventListener('DOMContentLoaded', function f() {
     }
     setSize();
     map = new google.maps.Map(mapdiv, {
-        zoom: 7,
+        zoom: 5,
         mapTypeId: google.maps.MapTypeId.ROADMAP,
         center: new google.maps.LatLng({{lat}},{{lon}})
     });
@@ -223,8 +246,8 @@ document.addEventListener('DOMContentLoaded', function f() {
         if (e.keyCode == 8 || e.keyCode == 46) { // backspace/delete
             completing = false;
         }
-        // space, comma, colon/semicolon, period and slash/?
-        if ([32, 186, 188, 189, 190, 191].indexOf(e.keyCode) != -1) {
+        // space, comma, colon/semicolon, period and slash/? (59 = : on ff)
+        if ([32, 59, 186, 188, 189, 190, 191].indexOf(e.keyCode) != -1) {
             if (completing) {
                 var input = $("#chat-input");
                 input.selectionEnd += 1;
@@ -254,6 +277,7 @@ document.addEventListener('DOMContentLoaded', function f() {
                 xhr.send(JSON.stringify(request));
                 input.value = "";
             }
+            requestNotificationPermission();
         }
     }, false);
     var lastWindow = null;
@@ -306,6 +330,7 @@ document.addEventListener('DOMContentLoaded', function f() {
                     lastWindow.close();
                     lastWindow = null;
                 }
+                clearSelection();
                 var span = document.createElement("span");
                 span.textContent = "Name: " + m.nick;
                 var info = new google.maps.InfoWindow({
@@ -325,7 +350,9 @@ document.addEventListener('DOMContentLoaded', function f() {
 
         li.setAttribute("userid", escape(m.user));
 
-        li.textContent = "" + hh + ":" + mm + " " + m.nick + ": ";
+        //li.textContent = "" + hh + ":" + mm + " " + m.nick + ": ";
+        var span = document.createElement("span");
+        span.textContent = "" + hh + ":" + mm + " " + m.nick + ": ";
         var lispan = document.createElement("span");
         var ptr = -1;
         var http  = m.msg.indexOf("http://");
@@ -364,9 +391,12 @@ document.addEventListener('DOMContentLoaded', function f() {
             }
         }
 
-        li.appendChild(lispan);
         if (m.nick != nick && m.msg.match(nickre))
             lispan.setAttribute("style", "color: red");
+        span.appendChild(lispan);
+        li.appendChild(span);
+        if (countMissed && panto)
+            showNotification(span);
         li.style.cursor = "pointer";
 
         if (panto) {
@@ -554,8 +584,8 @@ document.addEventListener('DOMContentLoaded', function f() {
 <div id="chat-box" style="min-width: 230px; float: right; border: 1px solid black; width: 29%;">
 <div style="padding: 5px">
   <div style="margin-bottom: 3px">
-  <label for="chat-nick" style="display: inline-block; width: 30%">Name</label>
-  <input type="text" id="chat-nick" style="width: 66%">
+  <label for="chat-nick" style="display: inline-block; width: 31%">Name</label>
+  <input type="text" id="chat-nick" style="margin-left: auto; width: 66%">
   </div>
 
   <div id="chat-text" style="background: #eee; overflow-y: auto; padding: 3px; margin-bottom: 3px">
