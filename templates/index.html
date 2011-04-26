@@ -14,12 +14,7 @@
 try {
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) {
-    var nodes = document.querySelectorAll(sel);
-    var list = [];
-    for (var i = 0; i < nodes.length; i++) {
-        list.push(nodes[i]);
-    }
-    return list;
+    return Array.prototype.slice.call(document.querySelectorAll(sel), 0);
 }
 function setSize() {
     $$("#map, #chat-box").forEach(function (e) {
@@ -114,6 +109,10 @@ document.addEventListener('DOMContentLoaded', function f() {
                 "; path=/";
     }
     function savenick() {
+        if (nick.length > 10) {
+            nick = nick.substring(0, 10);
+            $("#chat-nick").value = nick;
+        }
         document.cookie = "chatnick=" + escape(nick) + "; expires=" +
                 (new Date(Date.now() + 1000 * 3600 * 24 * 365).toGMTString()) +
                 "; path=/";

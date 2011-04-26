@@ -15,7 +15,7 @@ import simplejson
 GEO_URL = "http://abort.boom.net/~pfnguyen/geoip.cgi/%s"
 BERMUDA_TRIANGLE = { 'latitude': 25.443275, 'longitude': -70.576172 }
 
-VERSION = 201104051125
+VERSION = 201104131254
 
 class Message(db.Model):
     user    = db.StringProperty()
@@ -29,10 +29,12 @@ class Handler(RequestHandler):
     def user(self):
         return users.get_current_user()
 
-    def render(self, tmpl, params={}):
+    def render(self, tmpl, params=None):
+        params = params or {}
         self.response.out.write(self.process(tmpl, params))
 
-    def process(self, tmpl, params={}):
+    def process(self, tmpl, params=None):
+        params = params or {}
         user = self.user()
 
         p = {
@@ -167,6 +169,9 @@ class PlaybackHandler(Handler):
 
 class SendHandler(Handler):
     def post(self):
+        if not self.request.cookies.has_key('chatuser'):
+            self.respond("Forbidden", 403)
+            return
         m = simplejson.loads(self.request.body)
 
         squelch = decay_squelch(m['user'])
@@ -215,13 +220,17 @@ class MainHandler(Handler):
             userid = self.request.cookies['chatuser']
         else:
             userid = str(uuid.uuid4())
+        channels = get_channels()
+        online = len(channels)
+        if not channels.has_key(userid):
+            online += 1
         self.render("index.html", {
             'lat':     lat,
             'lon':     lon,
             #'channel': channel.create_channel(userid),
             'userid':  userid,
             # get_channels doesn't include this user's new channel yet
-            'users':   len(get_channels()) + 1,
+            'users':   online,
             'version': VERSION,
         });
 
@@ -263,7 +272,7 @@ class ChannelTokenHandler(Handler):
         if self.request.cookies.has_key('chatuser'):
             userid = self.request.cookies['chatuser']
         else:
-            self.respond("Error", 403)
+            self.respond("Forbidden", 403)
             return
 
         channelkey = None
